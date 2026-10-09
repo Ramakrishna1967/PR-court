@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-void: #0a0a0a;
+    --surface-lowest: #0e0e11;
+    --surface-low: #1b1b1e;
+    --surface-mid: #1f1f22;
+    --surface-high: #2a2a2d;
+    --surface-highest: #353438;
+    --text-primary: #e4e1e6;
+    --text-muted: #c4c7c7;
+    --text-dim: #71717a;
+    --border-hairline: rgba(255, 255, 255, 0.08);
+    --border-subtle: rgba(255, 255, 255, 0.16);
+    --grid-line: rgba(255, 255, 255, 0.03);
+  }
+
+  .light {
+    --bg-void: #f7f7f8;
+    --surface-lowest: #ffffff;
+    --surface-low: #f0f0f3;
+    --surface-mid: #e9e9ed;
+    --surface-high: #dedee3;
+    --surface-highest: #d2d2d8;
+    --text-primary: #121214;
+    --text-muted: #4b4b54;
+    --text-dim: #71717a;
+    --border-hairline: rgba(0, 0, 0, 0.08);
+    --border-subtle: rgba(0, 0, 0, 0.16);
+    --grid-line: rgba(0, 0, 0, 0.03);
+  }
+
+  body {
+    background-color: var(--bg-void);
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+.font-serif,
+.font-headline-xl,
+.font-headline-lg,
+.font-headline-md,
+.font-headline-sm {
+  font-family: 'Playfair Display', Georgia, serif;
+}
+
+.font-mono,
+.font-body-lg,
+.font-body-md,
+.font-body-sm,
+.font-label-md,
+.font-label-sm,
+.font-telemetry-code {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+@keyframes marquee {
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-marquee {
+  animation: marquee 28s linear infinite;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+}
+.light ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}

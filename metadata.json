@@ -1,0 +1,6 @@
+{
+  "name": "PR Court",
+  "description": "Autonomous adversarial code review tribunal. Cryptographic jury ruling strictly on executed evidence and sandbox proofs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
