@@ -1,5 +1,10 @@
-import React, { useState } from 'react';
-import { TrialCase, VerdictStatus } from '../types';
+import React, { useState, useEffect } from 'react';
+import { api } from '../lib/api/client';
+import type { TrialSummary, VerdictType } from '../lib/api/client';
+import { INITIAL_TRIAL_CASES } from '../data/mockData';
+import type { TrialCase, VerdictStatus } from '../types';
+
+const USE_MOCK = (import.meta as any).env?.VITE_USE_MOCK === 'true';
 
 interface VerdictsViewProps {
   cases: TrialCase[];
@@ -7,50 +12,118 @@ interface VerdictsViewProps {
   onAppealCase: (caseId: string) => void;
 }
 
+type DisplayCase = {
+  id: string;
+  prNumber: number;
+  title: string;
+  repository: string;
+  author: string;
+  date: string;
+  status: VerdictStatus;
+  riskScore: 'LOW' | 'MEDIUM' | 'CRITICAL';
+  clockMs: number;
+  summary: string | null;
+  // extended (from real API)
+  isReal?: boolean;
+};
+
+function apiToDisplay(t: TrialSummary): DisplayCase {
+  const statusMap: Record<string, VerdictStatus> = {
+    MERGE: 'APPROVED',
+    FIX_FIRST: 'CONDITIONAL',
+    BLOCK: 'REJECTED',
+    INCONCLUSIVE: 'CONDITIONAL',
+  };
+  const riskMap: Record<string, 'LOW' | 'MEDIUM' | 'CRITICAL'> = {
+    LOW: 'LOW',
+    MEDIUM: 'MEDIUM',
+    HIGH: 'CRITICAL',
+  };
+  return {
+    id: t.id,
+    prNumber: t.pr_number,
+    title: `${t.repo} PR #${t.pr_number}`,
+    repository: t.repo,
+    author: 'github',
+    date: new Date(t.created_at).toUTCString(),
+    status: statusMap[t.verdict || 'INCONCLUSIVE'] || 'CONDITIONAL',
+    riskScore: riskMap[t.risk || 'LOW'] || 'LOW',
+    clockMs: 0,
+    summary: t.summary,
+    isReal: true,
+  };
+}
+
+function mockToDisplay(c: TrialCase): DisplayCase {
+  return {
+    id: c.id,
+    prNumber: c.prNumber,
+    title: c.title,
+    repository: c.repository,
+    author: c.author,
+    date: c.date,
+    status: c.status,
+    riskScore: c.riskScore,
+    clockMs: c.telemetry.clockMs,
+    summary: c.determinationSummary,
+    isReal: false,
+  };
+}
+
+const getStatusBadge = (status: VerdictStatus) => {
+  switch (status) {
+    case 'APPROVED': return { label: 'MERGE APPROVED', style: 'border-emerald-500/30 text-emerald-400 bg-emerald-950/20', dot: 'bg-emerald-400' };
+    case 'REJECTED': return { label: 'BLOCKED · FAILED', style: 'border-red-500/30 text-red-400 bg-red-950/20', dot: 'bg-red-400' };
+    case 'CONDITIONAL': return { label: 'CONDITIONAL PASS', style: 'border-amber-500/30 text-amber-400 bg-amber-950/20', dot: 'bg-amber-400' };
+    case 'APPEALED': return { label: 'APPEAL RESTORED', style: 'border-sky-500/30 text-sky-400 bg-sky-950/20', dot: 'bg-sky-400' };
+  }
+};
+
 export const VerdictsView: React.FC<VerdictsViewProps> = ({ cases, onOpenTrialModal, onAppealCase }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
-  const [selectedCase, setSelectedCase] = useState<TrialCase | null>(cases[0]);
+  const [apiCases, setApiCases] = useState<DisplayCase[]>([]);
+  const [isLoading, setIsLoading] = useState(!USE_MOCK);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
 
-  const filteredCases = cases.filter((c) => {
+  // Fetch real trials from backend
+  useEffect(() => {
+    if (USE_MOCK) return;
+    setIsLoading(true);
+    api.listTrials({ page })
+      .then(res => {
+        setApiCases(res.trials.map(apiToDisplay));
+        setTotal(res.total);
+      })
+      .catch(e => setApiError(String(e)))
+      .finally(() => setIsLoading(false));
+  }, [page]);
+
+  // Combine mock + real cases
+  const mockDisplayCases = cases.map(mockToDisplay);
+  const allCases: DisplayCase[] = USE_MOCK
+    ? mockDisplayCases
+    : [...apiCases, ...mockDisplayCases];
+
+  const filteredCases = allCases.filter((c) => {
     const matchesSearch =
       c.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       c.repository.toLowerCase().includes(searchTerm.toLowerCase()) ||
       c.author.toLowerCase().includes(searchTerm.toLowerCase()) ||
       String(c.prNumber).includes(searchTerm);
-
     const matchesStatus = filterStatus === 'ALL' || c.status === filterStatus;
     return matchesSearch && matchesStatus;
   });
 
-  const getStatusBadge = (status: VerdictStatus) => {
-    switch (status) {
-      case 'APPROVED':
-        return {
-          label: 'MERGE APPROVED',
-          style: 'border-emerald-500/30 text-emerald-400 bg-emerald-950/20',
-          dot: 'bg-emerald-400'
-        };
-      case 'REJECTED':
-        return {
-          label: 'BLOCKED · FAILED',
-          style: 'border-red-500/30 text-red-400 bg-red-950/20',
-          dot: 'bg-red-400'
-        };
-      case 'CONDITIONAL':
-        return {
-          label: 'CONDITIONAL PASS',
-          style: 'border-amber-500/30 text-amber-400 bg-amber-950/20',
-          dot: 'bg-amber-400'
-        };
-      case 'APPEALED':
-        return {
-          label: 'APPEAL RESTORED',
-          style: 'border-sky-500/30 text-sky-400 bg-sky-950/20',
-          dot: 'bg-sky-400'
-        };
+  const [selectedCase, setSelectedCase] = useState<DisplayCase | null>(filteredCases[0] || null);
+
+  useEffect(() => {
+    if (!selectedCase && filteredCases.length > 0) {
+      setSelectedCase(filteredCases[0]);
     }
-  };
+  }, [filteredCases.length]);
 
   return (
     <div className="w-full px-4 md:px-8 lg:px-12 py-12 text-[#e4e1e6]">
@@ -62,7 +135,7 @@ export const VerdictsView: React.FC<VerdictsViewProps> = ({ cases, onOpenTrialMo
               IMMUTABLE DOCKET LEDGER
             </span>
             <span className="text-[10px] font-mono text-zinc-500">
-              {cases.length} ADJUDICATED CASES
+              {total || allCases.length} ADJUDICATED CASES
             </span>
           </div>
           <h1 className="font-serif text-3xl sm:text-5xl text-white tracking-tight">
@@ -72,19 +145,32 @@ export const VerdictsView: React.FC<VerdictsViewProps> = ({ cases, onOpenTrialMo
             Auditable trail of PR trials, adversarial claims, formal invariants, and signed jury consensus tokens.
           </p>
         </div>
-
         <button
           onClick={onOpenTrialModal}
           className="px-5 py-2.5 bg-white text-black font-mono text-xs uppercase font-semibold hover:bg-zinc-200 transition-colors flex items-center gap-2 self-start md:self-auto"
         >
           <span>Submit PR for Verdict</span>
-          <span className="material-symbols-outlined text-[15px]">add</span>
+          <span>+</span>
         </button>
       </div>
 
+      {/* Error state */}
+      {apiError && (
+        <div className="mb-4 p-3 bg-red-950/20 border border-red-500/30 font-mono text-xs text-red-300">
+          ✗ Backend unavailable: {apiError}. Showing demo data.
+        </div>
+      )}
+
+      {/* Loading state */}
+      {isLoading && (
+        <div className="mb-4 flex items-center gap-2 font-mono text-xs text-zinc-500">
+          <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-pulse" />
+          Fetching trial records...
+        </div>
+      )}
+
       {/* Filter and Search Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pb-6 border-b border-white/[0.08] mb-8 font-mono text-xs">
-        {/* Search Input */}
         <div className="relative flex-1 max-w-md">
           <input
             type="text"
@@ -93,12 +179,8 @@ export const VerdictsView: React.FC<VerdictsViewProps> = ({ cases, onOpenTrialMo
             placeholder="Search by PR #, filename, repo, author..."
             className="w-full bg-[#0e0e11] border border-white/10 text-white pl-9 pr-4 py-2 text-xs focus:outline-none focus:border-white transition-colors"
           />
-          <span className="material-symbols-outlined absolute left-2.5 top-2 text-zinc-500 text-[16px]">
-            search
-          </span>
+          <span className="absolute left-2.5 top-2 text-zinc-500 text-[16px]">⌕</span>
         </div>
-
-        {/* Status Filters */}
         <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
           {['ALL', 'APPROVED', 'REJECTED', 'CONDITIONAL', 'APPEALED'].map((status) => (
             <button
@@ -116,13 +198,13 @@ export const VerdictsView: React.FC<VerdictsViewProps> = ({ cases, onOpenTrialMo
         </div>
       </div>
 
-      {/* Split layout: Docket Table / Grid on left, Selected Case Details on right */}
+      {/* Split layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Case List */}
+        {/* Case list */}
         <div className="lg:col-span-5 space-y-3 font-mono">
           {filteredCases.length === 0 ? (
             <div className="p-8 text-center text-zinc-500 border border-white/10 bg-[#0e0e11]">
-              No dockets found matching criteria.
+              {isLoading ? 'Loading...' : 'No dockets found matching criteria.'}
             </div>
           ) : (
             filteredCases.map((c) => {
@@ -143,19 +225,18 @@ export const VerdictsView: React.FC<VerdictsViewProps> = ({ cases, onOpenTrialMo
                       #{c.prNumber} · {c.title}
                     </span>
                     <span className={`px-2 py-0.5 border text-[10px] uppercase flex items-center gap-1.5 ${badge.style}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`}></span>
+                      <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
                       <span>{badge.label}</span>
                     </span>
                   </div>
-
                   <div className="flex items-center justify-between text-[11px] text-zinc-400">
                     <span>{c.repository}</span>
                     <span className="text-zinc-500">by {c.author}</span>
                   </div>
-
                   <div className="mt-2 pt-2 border-t border-white/[0.05] flex items-center justify-between text-[10px] text-zinc-500">
-                    <span>TRIED IN: {c.telemetry.clockMs}ms</span>
+                    <span>{c.clockMs ? `TRIED IN: ${c.clockMs}ms` : new Date(c.date).toLocaleDateString()}</span>
                     <span>RISK: {c.riskScore}</span>
+                    {c.isReal && <span className="text-emerald-400">● LIVE</span>}
                   </div>
                 </div>
               );
@@ -163,11 +244,10 @@ export const VerdictsView: React.FC<VerdictsViewProps> = ({ cases, onOpenTrialMo
           )}
         </div>
 
-        {/* Selected Case Dossier */}
+        {/* Selected case dossier */}
         <div className="lg:col-span-7">
           {selectedCase ? (
             <div className="border border-white/[0.08] bg-[#0e0e11] p-6 font-mono text-xs space-y-6">
-              {/* Header */}
               <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-white/[0.08]">
                 <div>
                   <div className="flex items-center gap-2">
@@ -181,7 +261,6 @@ export const VerdictsView: React.FC<VerdictsViewProps> = ({ cases, onOpenTrialMo
                     Repo: <span className="text-white">{selectedCase.repository}</span> · Author: <span className="text-white">{selectedCase.author}</span> · {selectedCase.date}
                   </div>
                 </div>
-
                 <div className="flex items-center gap-2">
                   {selectedCase.status !== 'APPEALED' && (
                     <button
@@ -192,100 +271,24 @@ export const VerdictsView: React.FC<VerdictsViewProps> = ({ cases, onOpenTrialMo
                     </button>
                   )}
                   <span className={`px-3 py-1 border text-xs uppercase flex items-center gap-1.5 ${getStatusBadge(selectedCase.status).style}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${getStatusBadge(selectedCase.status).dot}`}></span>
+                    <span className={`w-1.5 h-1.5 rounded-full ${getStatusBadge(selectedCase.status).dot}`} />
                     <span>{getStatusBadge(selectedCase.status).label}</span>
                   </span>
                 </div>
               </div>
 
-              {/* Indictment Section */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-red-400 font-semibold text-xs uppercase">
-                  <span className="w-2 h-2 bg-red-400"></span>
-                  <span>Prosecution Indictment</span>
-                  <span className="text-zinc-500 font-normal">
-                    (Confidence: {selectedCase.prosecutionConfidence}%)
-                  </span>
+              {/* Summary / verdict */}
+              {selectedCase.summary && (
+                <div className="space-y-2">
+                  <div className="text-xs uppercase text-white font-semibold">Verdict Summary</div>
+                  <p className="text-zinc-300 leading-relaxed">{selectedCase.summary}</p>
                 </div>
-                <p className="text-zinc-300 leading-relaxed">
-                  {selectedCase.indictment.description}
-                </p>
-                <div className="p-3 bg-red-950/20 border border-red-500/20 text-red-300 space-y-1">
-                  <div className="font-semibold text-[11px]">REPRODUCED EXPLOIT:</div>
-                  {selectedCase.indictment.exploitSynthesis.map((exp, i) => (
-                    <div key={i}>{exp}</div>
-                  ))}
-                </div>
-              </div>
+              )}
 
-              {/* Code Diff Snapshot */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-zinc-400">
-                  <span className="text-xs uppercase text-white font-semibold">Evidence Code Diff</span>
-                  <span className="text-[10px] text-zinc-500">
-                    {selectedCase.evidenceDiff.filename} ({selectedCase.evidenceDiff.lines})
-                  </span>
-                </div>
-                <div className="bg-[#050506] border border-white/[0.08] p-3 text-[11px] leading-relaxed">
-                  {selectedCase.evidenceDiff.diffSnippet.map((diff, i) => (
-                    <div
-                      key={i}
-                      className={
-                        diff.type === 'del'
-                          ? 'text-red-400 bg-red-950/20 px-1'
-                          : diff.type === 'add'
-                          ? 'text-emerald-400 bg-emerald-950/20 px-1'
-                          : 'text-zinc-400 px-1'
-                      }
-                    >
-                      {diff.code}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Defense Section */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-blue-400 font-semibold text-xs uppercase">
-                  <span className="w-2 h-2 bg-blue-400"></span>
-                  <span>Defense Plea & Invariants</span>
-                  <span className="text-zinc-500 font-normal">
-                    (Confidence: {selectedCase.defenseConfidence}%)
-                  </span>
-                </div>
-                <p className="text-zinc-300 leading-relaxed">
-                  {selectedCase.defense.plea}
-                </p>
-                <div className="p-3 bg-blue-950/20 border border-blue-500/20 text-blue-300 space-y-1">
-                  <div className="font-semibold text-[11px]">MATHEMATICAL SPEC:</div>
-                  {selectedCase.defense.verifiedInvariant.map((inv, i) => (
-                    <div key={i}>{inv}</div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Jury Votes */}
-              <div className="pt-4 border-t border-white/[0.08]">
-                <div className="text-xs uppercase text-zinc-400 mb-3">Jury Triad Consensus</div>
-                <div className="grid grid-cols-3 gap-3">
-                  {selectedCase.juryVotes.map((j, i) => (
-                    <div key={i} className="p-2.5 bg-[#050506] border border-white/10 text-center">
-                      <div className="text-[10px] text-zinc-500">{j.juror}</div>
-                      <div className="text-[10px] text-zinc-400">{j.role}</div>
-                      <div className={`mt-1 font-bold ${
-                        j.vote === 'PASS' ? 'text-emerald-400' : j.vote === 'FAIL' ? 'text-red-400' : 'text-amber-400'
-                      }`}>
-                        [{j.vote}]
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Bottom Cryptographic Tape Ledger Hash */}
+              {/* Hash footer */}
               <div className="pt-3 border-t border-white/[0.08] flex items-center justify-between text-[10px] text-zinc-500">
-                <span>HASH: 0x9f7e8a...c3d2</span>
-                <span>SIGNED BY: PR_COURT_ORACLE_KEY_2026</span>
+                <span>ID: {selectedCase.id.slice(0, 16)}...</span>
+                <span>PR_COURT_ORACLE_KEY_2026</span>
               </div>
             </div>
           ) : (
@@ -295,6 +298,27 @@ export const VerdictsView: React.FC<VerdictsViewProps> = ({ cases, onOpenTrialMo
           )}
         </div>
       </div>
+
+      {/* Pagination */}
+      {!USE_MOCK && total > 20 && (
+        <div className="mt-6 flex items-center justify-center gap-2 font-mono text-xs">
+          <button
+            disabled={page <= 1}
+            onClick={() => setPage(p => p - 1)}
+            className="px-3 py-1.5 border border-white/10 text-zinc-400 hover:text-white disabled:opacity-30"
+          >
+            ← Prev
+          </button>
+          <span className="text-zinc-500">Page {page}</span>
+          <button
+            disabled={apiCases.length < 20}
+            onClick={() => setPage(p => p + 1)}
+            className="px-3 py-1.5 border border-white/10 text-zinc-400 hover:text-white disabled:opacity-30"
+          >
+            Next →
+          </button>
+        </div>
+      )}
     </div>
   );
 };
